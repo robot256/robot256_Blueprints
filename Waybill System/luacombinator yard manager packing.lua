@@ -1,7 +1,45 @@
-function numberOfSetBits(i)
-  i = i - bit32.band(bit32.rshift(i,1), 0x55555555)
-  i = bit32.band(i, 0x33333333) + bit32.band(bit32.rshift(i, 2), 0x33333333)
-  return bit32.rshift( (bit32.band(i + bit32.rshift(i, 4), 0x0F0F0F0F) * 0x01010101), 24)
+-- inputs[2].red contains the yard-wide constant definitions
+-- signal-Y = yard ID number
+-- signal-C = yard column (group of 32 tracks)
+-- signal-white = code for empty track (must be 0 or absent)
+-- signal-black = code for error track (must be number of bits allocated for each track)
+-- item-signals = code for each valid item (items not listed will be treated as errors)
+
+
+if inputs[2].red and inputs[2].red['signal-Y'] and inputs[2].red['signal-Y'] > 0 then
+  -- Global inputs active, change stored global variables
+
+  local signalPackingOrder = {'signal-0','signal-1','signal-2','signal-3','signal-4','signal-5',
+      'signal-6','signal-7','signal-8','signal-9','signal-A','signal-B','signal-C','signal-D',
+      'signal-E','signal-F','signal-G','signal-H','signal-I','signal-J','signal-K','signal-L',
+      'signal-M','signal-N','signal-O','signal-P','signal-Q','signal-R','signal-S','signal-T',
+      'signal-U','signal-V','signal-W','signal-X','signal-Y','signal-Z',
+      'signal-red','signal-yellow','signal-green','signal-cyan'}
+
+  contentsCodes = inputs[2].red
+  yard = contentsCodes['signal-Y']
+  columns = contentsCodes['signal-C']
+  
+  -- Mask has as many bits as are allowed for each track.  Must be 2^N-1.
+  local packedMask = contentsCodes['signal-black']
+  bitsPerTrack = nil
+  if packedMask==0x3 then bitsPerTrack = 2
+  elseif packedMask==0x7 then bitsPerTrack = 3
+  elseif packedMask==0xF then bitsPerTrack = 4
+  elseif packedMask==0x1F then bitsPerTrack = 5
+  elseif packedMask==0x3F then bitsPerTrack = 6
+  elseif packedMask==0x7F then bitsPerTrack = 7
+  elseif packedMask==0xFF then bitsPerTrack = 8 end
+  assert(bitsPerTrack ~= nil, "Invalid mask set on signal-black")
+
+  -- Clear virtual signals from code lookup dictionary
+  contentsCodes['signal-Y'] = nil
+  contentsCodes['signal-C'] = nil
+  contentsCodes['signal-white'] = nil
+  contentsCodes['signal-black'] = nil
+  emptyCode = 0
+  errorCode = packedMask
+  
 end
 
 -- Items we have consumption dispatcher stops to program
