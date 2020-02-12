@@ -3,18 +3,41 @@
 -- signal-C = yard column (group of 32 tracks)
 -- signal-white = code for empty track (must be 0 or absent)
 -- signal-black = code for error track (must be number of bits allocated for each track)
--- item-signals = code for each valid item (items not listed will be treated as errors)
+-- item-signals[bits 7:0] = code for each valid item, range 1:errorCode-1 (items not listed will be treated as errors)
+-- item-signals[bits 15:8] = Logistics request threshold (request more when we have fewer than this)
+-- item-signals[bits 23:16] = Logistics preferred value (will request up to this amount, and provide down to this amount)
+-- item-signals[bits 31:24] = Logistics provide threshold (provide excess when we have more than this)
+--
+-- If item-signals[bits 7:0] is zero but upper bits are set, upper bits will be ignored.
+-- Example: iron-plate = 1<<0 + 4<<8 + 19<<16 + 255<<24
+--   iron-plate is encoded as "1"
+--   iron-plate is requested when there are 3 or fewer left in the yard
+--   when iron-plate is requested, enough is requested so that we will have 19 in the yard
+--   iron-plate is provided ony if there are 256 of it in the yard (will never happen)
+--
+-- Example: advanced-circuit = 5<<0 + 0<<8 + 0<<16 + 8<<24
+--   advanced-circuit is encoded as "5"
+--   advanced-circuit is never requested
+--   when advanced-circuit is provided, all available units are fair game
+--   advanced-circuit is provided only once there are 8 units stored in the yard
+--
+-- Example: cargo-wagon = 14<<0 + 5<<8 + 16<<16 + 31<<24
+--   cargo-wagon (empty cargo wagon unit) is encoded as "14"
+--   empty cargo wagons are requested if there are 4 or fewer in the yard
+--   when empty cargo wagons are requested, yard is filled to 16 units
+--   if there are ever 32 or more emptys here, they can be provided to other yards
 
 
-if inputs[2].red and inputs[2].red['signal-Y'] and inputs[2].red['signal-Y'] > 0 then
-  -- Global inputs active, change stored global variables
 
-  local signalPackingOrder = {'signal-0','signal-1','signal-2','signal-3','signal-4','signal-5',
+signalPackingOrder = {'signal-0','signal-1','signal-2','signal-3','signal-4','signal-5',
       'signal-6','signal-7','signal-8','signal-9','signal-A','signal-B','signal-C','signal-D',
       'signal-E','signal-F','signal-G','signal-H','signal-I','signal-J','signal-K','signal-L',
       'signal-M','signal-N','signal-O','signal-P','signal-Q','signal-R','signal-S','signal-T',
       'signal-U','signal-V','signal-W','signal-X','signal-Y','signal-Z',
       'signal-red','signal-yellow','signal-green','signal-cyan'}
+
+if inputs[2].red and inputs[2].red['signal-Y'] and inputs[2].red['signal-Y'] > 0 then
+  -- Global inputs active, change stored global variables
 
   contentsCodes = inputs[2].red
   yard = contentsCodes['signal-Y']
