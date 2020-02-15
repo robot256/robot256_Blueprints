@@ -1,7 +1,7 @@
 -- inputs[2].red contains the yard-wide constant definitions
 -- signal-Y = yard ID number
--- signal-C = yard column (group of 32 tracks)
--- signal-white = code for empty track (must be 0 or absent)
+-- signal-C = Total number of yard colunms (groups of 32 tracks)
+-- signal-white = code for vacant track (must be 0 or absent)
 -- signal-black = code for error track (must be number of bits allocated for each track)
 -- item-signals[bits 7:0] = code for each valid item, range 1:errorCode-1 (items not listed will be treated as errors)
 -- item-signals[bits 15:8] = Logistics request threshold (request more when we have fewer than this)
@@ -26,8 +26,12 @@
 --   empty cargo wagons are requested if there are 4 or fewer in the yard
 --   when empty cargo wagons are requested, yard is filled to 16 units
 --   if there are ever 32 or more emptys here, they can be provided to other yards
+--
+-- inputs[2].green contains the yard contents
+--   
 
 
+constConnector = inputs[2].red
 
 signalPackingOrder = {'signal-0','signal-1','signal-2','signal-3','signal-4','signal-5',
       'signal-6','signal-7','signal-8','signal-9','signal-A','signal-B','signal-C','signal-D',
@@ -36,10 +40,10 @@ signalPackingOrder = {'signal-0','signal-1','signal-2','signal-3','signal-4','si
       'signal-U','signal-V','signal-W','signal-X','signal-Y','signal-Z',
       'signal-red','signal-yellow','signal-green','signal-cyan'}
 
-if inputs[2].red and inputs[2].red['signal-Y'] and inputs[2].red['signal-Y'] > 0 then
+if constConnector and constConnector['signal-Y'] and constConnector['signal-Y'] > 0 then
   -- Global inputs active, change stored global variables
 
-  contentsCodes = inputs[2].red
+  contentsCodes = constConnector
   yard = contentsCodes['signal-Y']
   columns = contentsCodes['signal-C']
   
@@ -54,27 +58,56 @@ if inputs[2].red and inputs[2].red['signal-Y'] and inputs[2].red['signal-Y'] > 0
   elseif packedMask==0x7F then bitsPerTrack = 7
   elseif packedMask==0xFF then bitsPerTrack = 8 end
   assert(bitsPerTrack ~= nil, "Invalid mask set on signal-black")
+  
 
   -- Clear virtual signals from code lookup dictionary
   contentsCodes['signal-Y'] = nil
   contentsCodes['signal-C'] = nil
   contentsCodes['signal-white'] = nil
   contentsCodes['signal-black'] = nil
-  emptyCode = 0
+  vacantCode = 0
   errorCode = packedMask
+  
+  -- Mask the remaining signal codes to the lower 8 bits
+  -- Extract the logistics parameters too
+  requestThreshold = {}
+  requestAmount = {}
+  provideThreshold = {}
+  codeLookup = {}
+  for sig,val in pairs(contentsCodes) do
+    requestThreshold[sig] = bit32.band(bit32.rshift(val,8), 0xFF)
+    requestAmount[sig] = bit32.band(bit32.rshift(val,16), 0xFF)
+    provideThreshold[sig] = bit32.band(bit32.rshift(val,24), 0xFF)
+    contentsCodes[sig] = bit32.band(val, 0xFF)
+    codeLookup[val] = sig
+  end
+  
+  -- Generate yard data unpacking table for one column
+  packedOutputSpecList = {}
+  for ct=1,32 do
+    local lsbIndex = (ct-1)*bitsPerTrack  -- starts at 0
+    local startDwordIndex = math.floor(lsbIndex/32)  -- starts at 0
+    local stopDwordIndex = math.floor((lsbIndex + (bitsPerTrack-1))/32)   -- starts at 0
+    local shifty = (lsbIndex%32)
+    local masky = bit32.lshift(packedMask,(lsbIndex%32))
+    if masky >= 2^31 then masky = masky - 2^32 end
+    local spec = {{index=startDwordIndex+1, shift=shifty, mask=masky}}
+    if stopDwordIndex > startDwordIndex then
+      -- MSBs are in the next word up
+      shifty = ((lsbIndex % 32) - 32)
+      masky = bit32.lshift(packedMask,(lsbIndex%32)-32)
+      if masky >= 2^31 then masky = masky - 2^32 end
+      table.insert(spec, {index=stopDwordIndex+1, shift=shifty, mask=masky})
+      --assert(ct~=7,"ct="..tostring(ct)..", index="..tostring(stopDwordIndex+1)..", shift="..tostring(shifty)..", mask="..tostring(masky))
+    end
+    table.insert(packedOutputSpecList, spec)
+    
+  end
   
 end
 
--- Items we have consumption dispatcher stops to program
-consumerItems = {['iron-plate']=true}
--- Items we request from other yards
-requestItems = {['iron-plate']=16, ['cargo-wagon']=16}
 
--- Yard ID constant
-yard = 1
-
--- Collate yard contents
-yardConnectors = {[1]=inputs[2].red, [33]=inputs[2].green, [65]=inputs[3].red, [97]=inputs[3].green}
+yardConnector = inputs[2].green
 
 -- Dictionary mapping item names to the dictionary of track numbers where those can be found
 -- yardContents['iron-plate'][23]=true means iron-plate can be found on track 23
@@ -83,29 +116,40 @@ yardContents = {}
 -- Dictionary mapping item-names to the tracks that have been reserved for ongoing consumer deliveries
 consumerDispatch = consumerDispatch or {}
 
-numEmpty = 0  -- how many tracks are empty this tick
+numVacant = 0  -- how many tracks are vacant this tick
 numError = 0  -- how many tracks contain messed up wagons this tick
-
-for offset, connector in pairs(yardConnectors) do
-  for signal, value in pairs(connector) do
-    if signal == 'signal-white' then
-      numEmpty = numEmpty + numberOfSetBits(value)
-    elseif signal == 'signal-black' then
-      numError = numError + numberOfSetBits(value)
+numUnknown = 0
+outputs[2] = {}
+for col=1,columns do
+  local colSigs = {signalPackingOrder[(col-1)*5+1], signalPackingOrder[(col-1)*5+2], signalPackingOrder[(col-1)*5+3],
+             signalPackingOrder[(col-1)*5+4], signalPackingOrder[(col-1)*5+5]}
+  -- repeat for all 32 tracks in this column
+  for colt=1,32 do
+    -- Check the bits for this track
+    local spec = packedOutputSpecList[colt]
+    local code = 0
+    for _,word in pairs(spec) do
+      if yardConnector[colSigs[word.index]] then
+        --assert(false,"colt="..tostring(colt)..", signal present="..colSigs[word.index])
+        code = code + bit32.rshift(bit32.band(yardConnector[colSigs[word.index]],word.mask),word.shift)
+      end
+    end
+    --assert(colt~=3,"Code #"..tostring(colt).." = "..tostring(code))
+    if code == vacantCode then
+      numVacant = numVacant + 1
+    elseif codeLookup[code] then
+      local track = (col-1)*32 + colt
+      yardContents[codeLookup[code]] = yardContents[codeLookup[code]] or {}
+      table.insert(yardContents[codeLookup[code]], track)
+    elseif code == errorCode then
+      numError = numError + 1
     else
-      yardContents[signal] = yardContents[signal] or {}
-      local i = value
-      local track = offset
-      while (i ~= 0) do           -- until all bits are zero
-        if bit32.btest(i,1) then     -- check lower bit
-          yardContents[signal][track] = true
-        end
-        track = track + 1
-        i = bit32.rshift(i, 1)              -- shift bits, removing lower bit
-      end -- while value>0
-    end -- if signal
-  end -- for signals
-end -- for yardConnectors
+      numUnknown = numUnknown + 1
+      --assert(false,"Code #"..tostring(colt).." = "..tostring(code))
+    end
+  end
+end
+
 
 local inventory = {}
 for item,list in pairs(yardContents) do
@@ -114,7 +158,9 @@ for item,list in pairs(yardContents) do
     inventory[item] = inventory[item] - table_size(consumerDispatch[item])
   end
 end
-inventory['signal-white'] = numEmpty
+inventory['signal-white'] = numVacant
+inventory['signal-red'] = numError
+inventory['signal-yellow'] = numUnknown
 outputs[2] = inventory
 
 
@@ -125,6 +171,7 @@ outputs[2] = inventory
 -- Step 3: select tracks for consumer trains to visit and add them to the reservation list
 waiting = inputs[1].green
 consumerOutputs = consumerOutputs or {}
+consumerItems = {}
 for item,_ in pairs(consumerItems) do
   -- Step 1: Copy list of reserved tracks, excluding ones that no longer contain the reserved item
   local validDispatch = {}

@@ -1,7 +1,7 @@
 -- inputs[2].red contains the yard-wide constant definitions
 -- signal-Y = yard ID number
--- signal-C = yard column (group of 32 tracks)
--- signal-white = code for empty track (must be 0 or absent)
+-- signal-C = ID of this yard column (group of 32 tracks)
+-- signal-white = code for vacant track (must be 0 or absent)
 -- signal-black = code for error track (must be number of bits allocated for each track)
 -- item-signals = code for each valid item (items not listed will be treated as errors)
 
@@ -45,8 +45,13 @@ if inputs[2].red and inputs[2].red['signal-Y'] and inputs[2].red['signal-Y'] > 0
   contentsCodes['signal-C'] = nil
   contentsCodes['signal-white'] = nil
   contentsCodes['signal-black'] = nil
-  emptyCode = 0
+  vacantCode = 0
   errorCode = packedMask
+  
+  -- Mask the remaining signal codes to the lower 8 bits
+  for sig,val in pairs(contentsCodes) do
+    contentsCodes[sig] = bit32.band(val, 0xFF)
+  end
   
   -- Find which N packed signals this column should output on.
   -- Each group of 32 tracks has exactly N signals to output N bits on.
@@ -102,7 +107,7 @@ local trackInput = inputs[1].green
 -- State machine generates outputs:
 -- outputs[1] goes to LTN and Stringy stops on this track
 -- signal-green = okay for train to leave
--- signal-pink = enable empty track dropoff stations
+-- signal-pink = enable vacant track dropoff stations
 -- signal-cyan = enable full track pickup station
 -- signal-red = track state is error, no stations enabled
 --
@@ -210,7 +215,7 @@ elseif state == 4 then
   -- Enable dropoff stations
   outputs[1] = {['signal-pink']=1,
                 ['signal-decouple']=2}
-  outputs[2] = packOutput(emptyCode)
+  outputs[2] = packOutput(vacantCode)
   state = 0
 else
   state = 0
