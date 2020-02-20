@@ -202,8 +202,7 @@ elseif state == 2 then
   state = 0
 elseif state == 3 then
   -- Enable pickup stations
-  outputs[1] = {['signal-cyan']=1,
-                ['signal-couple']=1}
+  outputs[1] = {['signal-cyan']=1}
   -- Send inventory to the yard manager
   if contents and contentsCodes[contents] then
     outputs[2] = packOutput(contentsCodes[contents])
@@ -213,8 +212,7 @@ elseif state == 3 then
   state = 0
 elseif state == 4 then
   -- Enable dropoff stations
-  outputs[1] = {['signal-pink']=1,
-                ['signal-decouple']=2}
+  outputs[1] = {['signal-pink']=1}
   outputs[2] = packOutput(vacantCode)
   state = 0
 else

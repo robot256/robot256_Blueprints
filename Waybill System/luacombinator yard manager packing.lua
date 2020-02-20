@@ -74,12 +74,16 @@ if constConnector and constConnector['signal-Y'] and constConnector['signal-Y'] 
   requestAmount = {}
   provideThreshold = {}
   codeLookup = {}
+  consumerItems = {}
   for sig,val in pairs(contentsCodes) do
     requestThreshold[sig] = bit32.band(bit32.rshift(val,8), 0xFF)
     requestAmount[sig] = bit32.band(bit32.rshift(val,16), 0xFF)
     provideThreshold[sig] = bit32.band(bit32.rshift(val,24), 0xFF)
     contentsCodes[sig] = bit32.band(val, 0xFF)
-    codeLookup[val] = sig
+    codeLookup[bit32.band(val, 0xFF)] = sig
+    if requestAmount[sig] > 0 then
+      consumerItems[sig] = true
+    end
   end
   
   -- Generate yard data unpacking table for one column
@@ -140,7 +144,8 @@ for col=1,columns do
     elseif codeLookup[code] then
       local track = (col-1)*32 + colt
       yardContents[codeLookup[code]] = yardContents[codeLookup[code]] or {}
-      table.insert(yardContents[codeLookup[code]], track)
+      yardContents[codeLookup[code]][track] = true
+      --assert(false,"Added "..codeLookup[code].." to track "..tostring(track))
     elseif code == errorCode then
       numError = numError + 1
     else
@@ -149,6 +154,8 @@ for col=1,columns do
     end
   end
 end
+
+--assert(false,serpent.block(yardContents))
 
 
 local inventory = {}
@@ -169,12 +176,19 @@ outputs[2] = inventory
 -- Step 1: purge reservations after that track no longer contains the item in question
 -- Step 2: check if any new trains have arrived at consumer dispatchers
 -- Step 3: select tracks for consumer trains to visit and add them to the reservation list
+
+-- inputs[1].green: Inputs from Waiting stops on common green bus.
+--    Waiting stops are Dispatcher stops named "Y<X> PICKUP [item=<ITEM>]"
+--    Configured to output stopped train on <ITEM>
+--
+-- outputs[1] (red wire): Each Waiting Dispatcher stop has a buffer combinator translating that <ITEM> to signal-dispatcher on the red wire.
+
+
 waiting = inputs[1].green
 consumerOutputs = consumerOutputs or {}
-consumerItems = {}
-for item,_ in pairs(consumerItems) do
+local validDispatch = {}
+  for item,_ in pairs(contentsCodes) do
   -- Step 1: Copy list of reserved tracks, excluding ones that no longer contain the reserved item
-  local validDispatch = {}
   if consumerDispatch[item] and next(consumerDispatch[item]) then
     for track, _ in pairs(consumerDispatch[item]) do
       if yardContents[item] and yardContents[item][track] then
@@ -186,8 +200,12 @@ for item,_ in pairs(consumerItems) do
       end
     end
   end
-  consumerDispatch = validDispatch
-  -- Step 2 & 3
+end
+consumerDispatch = validDispatch
+
+
+-- Step 2 & 3
+for item,_ in pairs(contentsCodes) do
   if (waiting[item] and waiting[item] > 0) then
     if (not consumerOutputs[item] or consumerOutputs[item] == 0) then
       if yardContents[item] then
@@ -204,7 +222,7 @@ for item,_ in pairs(consumerItems) do
     end
   else
     -- no train waiting at dispatcher, clear output to that station
-    consumerOutputs[item] = nil
+    consumerOutputs[item] = 0
   end -- if waiting[item]
 end -- for consumerItems
 
